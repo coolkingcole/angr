@@ -7,12 +7,12 @@ import angr
 
 from common import bin_location, do_trace, load_cgc_pov, slow_test
 
-def tracer_cgc(filename, test_name, stdin, copy_states=False, follow_unsat=False):
+def tracer_cgc(filename, test_name, stdin, copy_states=False, follow_unsat=False, add_options=None):
     p = angr.Project(filename)
     p.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
     trace, magic, crash_mode, crash_addr = do_trace(p, test_name, stdin)
-    s = p.factory.entry_state(mode='tracing', stdin=angr.SimFileStream, flag_page=magic)
+    s = p.factory.entry_state(mode='tracing', stdin=angr.SimFileStream, flag_page=magic, add_options=add_options)
     s.preconstrainer.preconstrain_file(stdin, s.posix.stdin, True)
 
     simgr = p.factory.simulation_manager(s, hierarchy=False, save_unconstrained=crash_mode)
@@ -24,10 +24,10 @@ def tracer_cgc(filename, test_name, stdin, copy_states=False, follow_unsat=False
     return simgr, t
 
 
-def trace_cgc_with_pov_file(binary: str, test_name: str, pov_file: str, output_initial_bytes: bytes, copy_states=False):
+def trace_cgc_with_pov_file(binary: str, test_name: str, pov_file: str, output_initial_bytes: bytes, copy_states=False, add_options=None):
     nose.tools.assert_true(os.path.isfile(pov_file))
     pov = load_cgc_pov(pov_file)
-    trace_result = tracer_cgc(binary, test_name, b''.join(pov.writes), copy_states)
+    trace_result = tracer_cgc(binary, test_name, b''.join(pov.writes), copy_states, add_options=add_options)
     simgr = trace_result[0]
     simgr.run()
     nose.tools.assert_true("traced" in simgr.stashes)
@@ -213,6 +213,15 @@ def test_fdwait_fds():
     output = [b"For what material would you like to run this simulation?", b"  1. Air", b"  2. Aluminum",
               b"  3. Copper", b"  4. Custom\nSelection: "]
     trace_cgc_with_pov_file(binary, "tracer_floating_point_memory_reads", pov_file, b'\n'.join(output))
+
+def test_concretize_unsupported_vex_irops():
+    # Test tracing with concretizing unsupported VEX IR Ops
+    binary = os.path.join(bin_location, "tests", "cgc", "CROMU_00020")
+    pov_file = os.path.join(bin_location, "tests_data", "cgc_povs", "CROMU_00020_POV_00000.xml")
+    output = (b"\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x15\x00\x00\x00\x00\x00\x00\x00\x15" +
+              b"\x00\x00\x00\x00\x00\x00\x00\x15\x00\x00\x00\x00\x00\x00\x00")
+    add_options = set([angr.options.SUPPORT_FLOATING_POINT, angr.options.UNSUPPORTED_FORCE_CONCRETIZE])
+    trace_cgc_with_pov_file(binary, "tracer_concretize_unsupported_vex_irops", pov_file, output, add_options=add_options)
 
 def test_skip_some_symbolic_memory_writes():
     # Test symbolic memory write skipping in SimEngineUnicorn during tracing
